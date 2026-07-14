@@ -31,21 +31,19 @@ static BOOL shouldExecute() {
 }
 
 static void init_preferences() {
-    // We first get the extended preference plist
-    int result = libSandy_applyProfile("Flora_Preferences");
+    // Apply libSandy profile to allow sandbox access to the preferences file
+    libSandy_applyProfile("Flora_Preferences");
 
-    bool libSandyError = result == kLibSandyErrorXPCFailure;
-    NSString *suiteName = libSandyError ? BUNDLE_ID : FS_PREFERENCES(BUNDLE_ID);
-    preferences = [[NSUserDefaults alloc] initWithSuiteName:suiteName];
+    // Always use the bundle identifier as the suite name.
+    // The profile above grants the actual file access.
+    preferences = [[NSUserDefaults alloc] initWithSuiteName:BUNDLE_ID];
 
     id disableInAppsObject = [preferences objectForKey:@"disableInApps"];
     [preferences setObject:disableInAppsObject forKey:@"staticDisableInApps"];
     BOOL isDisabledInApps = [preferences boolForKey:@"staticDisableInApps"];
 
-    // If the user has disabled Flora in apps, then load preferences again with just the bundle id
-    // This won't exist in the context of the sandbox, so none of the colors would be themed anymore.
-    // The only problem is that this requires a respring to turn off
-    // TODO: See if it's possible to use a FloraPreferenceObserver here
+    // If the user has disabled Flora in apps, reload preferences without sandbox extension.
+    // This makes the file unreadable for sandboxed processes, effectively disabling theming.
     if (isDisabledInApps) {
         preferences = [[NSUserDefaults alloc] initWithSuiteName:BUNDLE_ID];
     }
@@ -170,67 +168,66 @@ static UIColor *getBubbleColor(NSString *type) {
 %end
 
 %ctor {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!preferences) {
-            init_preferences();
-        }
+    if (!preferences) {
+        init_preferences();
+    }
 
-        [preferences registerDefaults:@{
-            @"floraPrimaryColor": @"#e8a7bfff",
-            @"floraSecondaryColor": @"#d795f8ff",
-            @"floraSaturationInfluence": @0.4,
-            @"floraLightnessInfluence": @0.2,
-        }];
+    [preferences registerDefaults:@{
+        @"floraPrimaryColor": @"#e8a7bfff",
+        @"floraSecondaryColor": @"#d795f8ff",
+        @"floraSaturationInfluence": @0.4,
+        @"floraLightnessInfluence": @0.2,
+    }];
 
-        id enabledObject = [preferences objectForKey:@"enabled"];
-        [preferences setObject:enabledObject forKey:@"staticEnabled"];
-        BOOL isEnabled = [preferences boolForKey:@"staticEnabled"];
-        BOOL isValidContext = shouldExecute();
+    id enabledObject = [preferences objectForKey:@"enabled"];
+    [preferences setObject:enabledObject forKey:@"staticEnabled"];
+    BOOL isEnabled = [preferences boolForKey:@"staticEnabled"];
+    BOOL isValidContext = shouldExecute();
 
-        if (!isEnabled || !isValidContext) {
-            NSLog(@"[Flora] Tweak is disabled. Exiting...");
-            return;
-        }
+    if (!isEnabled || !isValidContext) {
+        NSLog(@"[Flora] Tweak is disabled. Exiting...");
+        return;
+    }
 
-        %init(Base)
+    // Install hooks immediately – do not delay.
+    %init(Base)
 
-        [Utilities loopUIColorWithBlock:^(unsigned int index, SEL selector, NSString *name, Method method, Class uiColorClass) {
-           __block UIColor *(*originalColorWithCGColor)(id self, SEL _cmd);
+    [Utilities loopUIColorWithBlock:^(unsigned int index, SEL selector, NSString *name, Method method, Class uiColorClass) {
+       __block UIColor *(*originalColorWithCGColor)(id self, SEL _cmd);
 
-            MSHookMessageEx(
-                uiColorClass,
-                selector,
-                imp_implementationWithBlock(^(id self, SEL _cmd) {
-                    UIColor *originalColor = originalColorWithCGColor(self, _cmd);
-                    
-                    // Disable tintColor in google services
-                    if ([[[NSBundle mainBundle] bundleIdentifier] hasPrefix:@"com.google"] && [name isEqualToString:@"tintColor"]) {
-                        return originalColor;
-                    }
+        MSHookMessageEx(
+            uiColorClass,
+            selector,
+            imp_implementationWithBlock(^(id self, SEL _cmd) {
+                UIColor *originalColor = originalColorWithCGColor(self, _cmd);
+                
+                // Disable tintColor in google services
+                if ([[[NSBundle mainBundle] bundleIdentifier] hasPrefix:@"com.google"] && [name isEqualToString:@"tintColor"]) {
+                    return originalColor;
+                }
 
-                    if ([name isEqualToString:@"whiteColor"] && ![preferences boolForKey:@"whiteColorEnabled"]) {
-                        return originalColor;
-                    }
+                if ([name isEqualToString:@"whiteColor"] && ![preferences boolForKey:@"whiteColorEnabled"]) {
+                    return originalColor;
+                }
 
-                    if ([[preferences objectForKey:@"mode"] isEqualToString:@"Simple"]) {
-                        return [Utilities simpleColorWithIndex:index preferences:preferences originalColor:originalColor];
-                    }
+                if ([[preferences objectForKey:@"mode"] isEqualToString:@"Simple"]) {
+                    return [Utilities simpleColorWithIndex:index preferences:preferences originalColor:originalColor];
+                }
 
-                    // It's necessary to use NSUserDefaults instead of GcColorPickerUtils here
-                    // so that we can take advantage of libSandy for the preferences
-                    NSString *originalColorHex = [Utilities hexStringFromColor:originalColor];
-                    NSString *colorFromDefaults = [preferences objectForKey:name] ?: originalColorHex;
-                    UIColor *parsedColor = [Utilities colorFromHexString:colorFromDefaults];
+                // It's necessary to use NSUserDefaults instead of GcColorPickerUtils here
+                // so that we can take advantage of libSandy for the preferences
+                NSString *originalColorHex = [Utilities hexStringFromColor:originalColor];
+                NSString *colorFromDefaults = [preferences objectForKey:name] ?: originalColorHex;
+                UIColor *parsedColor = [Utilities colorFromHexString:colorFromDefaults];
 
-                    return parsedColor;
-                }),
-                (IMP *)&originalColorWithCGColor
-            ); 
-        }];
+                return parsedColor;
+            }),
+            (IMP *)&originalColorWithCGColor
+        ); 
+    }];
 
-        #pragma mark - Music Hooks
-        if ([[[NSBundle mainBundle] bundleIdentifier] isEqualToString:@"com.apple.Music"]) {
-            %init(Music)
-        }
-    });
+    #pragma mark - Music Hooks
+    if ([[[NSBundle mainBundle] bundleIdentifier] isEqualToString:@"com.apple.Music"]) {
+        %init(Music)
+    }
 }
