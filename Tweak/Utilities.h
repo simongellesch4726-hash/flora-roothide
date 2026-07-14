@@ -1,5 +1,4 @@
 #import <UIKit/UIKit.h>
-#import <spawn.h>
 #import <roothide.h>
 #import <objc/runtime.h>
 #import <sys/sysctl.h>
@@ -8,8 +7,6 @@
 #import <Preferences/PSTableCell.h>
 #import <GcUniversal/GcColorPickerUtils.h>
 #import <zlib.h>
-#import <substrate.h>
-#import <spawn.h>
 #import "Constants.h"
 
 @interface Utilities : NSObject
