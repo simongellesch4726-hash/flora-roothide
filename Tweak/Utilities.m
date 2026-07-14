@@ -1,4 +1,5 @@
 #import "Utilities.h"
+#import <spawn.h>
 
 static int compareMethods(const void *method1, const void *method2) {
     Method m1 = *(Method *)method1;
@@ -142,12 +143,14 @@ static int compareMethods(const void *method1, const void *method2) {
 
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
-    if ([fileManager fileExistsAtPath:@"/var/Liy/.procursus_strapped"] && ![fileManager fileExistsAtPath:jbroot("/usr/local/bin/Xinamine")]) {
+    // Fixed: jbroot() returns const char *, must convert to NSString for fileExistsAtPath:
+    if ([fileManager fileExistsAtPath:[NSString stringWithUTF8String:jbroot("/usr/local/bin/Xinamine")]] && ![fileManager fileExistsAtPath:@"/var/Liy/.procursus_strapped"]) {
         const char *args[] = {"killall", "SpringBoard", NULL};
         posix_spawn(&pid, "/usr/bin/killall", NULL, NULL, (char *const *)args, environ);
         return;
     }
 
+    // jbroot() usage for posix_spawn expects const char *, so no conversion needed
     const char *args[] = {"sbreload", NULL};
     posix_spawn(&pid, jbroot("/usr/bin/sbreload"), NULL, NULL, (char *const *)args, environ);
 }
