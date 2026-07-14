@@ -73,6 +73,10 @@
     return self;
 }
 
+// Empty action to prevent crash when the hidden button is tapped
+- (void)nothing {
+}
+
 - (UIMenu *)createMenu {
     NSMutableArray *items = [NSMutableArray array];
 
