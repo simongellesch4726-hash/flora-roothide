@@ -1,5 +1,6 @@
 #import "FloraColorListController.h"
 #import <GcUniversal/GcColorPickerUtils.h>
+#import <objc/message.h>
 
 @interface FloraColorListController () {
     NSMutableArray *_allSpecifiers; // unfiltered
@@ -32,7 +33,8 @@
         // Get default color from original implementation
         UIColor *defaultColor = nil;
         if ([uiColorClass respondsToSelector:selector]) {
-            defaultColor = [uiColorClass performSelector:selector];
+            // ARC-safe: use objc_msgSend directly with proper cast
+            defaultColor = ((UIColor *(*)(id, SEL))objc_msgSend)(uiColorClass, selector);
         }
         NSString *defaultHex = defaultColor ? [Utilities hexStringFromColor:defaultColor] : @"#000000FF";
         
